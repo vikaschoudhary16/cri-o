@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/containers/storage/pkg/idtools"
-	"github.com/pkg/errors"
+	//"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	pb "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
@@ -19,28 +19,38 @@ func (s *Server) GetRuntimeConfigInfo(ctx context.Context, req *pb.GetRuntimeCon
 	}()
 	logrus.Debugf("GetRuntimeConfigInfo")
 	defaultIDMappings := s.getIDMappingsInfo()
-	uidMapping := &pb.LinuxIDMapping{ContainerId: uint32(0)}
-	gidMapping := &pb.LinuxIDMapping{ContainerId: uint32(0)}
-
-	if s.defaultIDMappings != nil {
-		hostID, size := s.getHostIDAndSizeForContainerID(0, defaultIDMappings.Uids)
-		if hostID < 0 || size <= 0 {
-			return nil, errors.New("usernamespace mapping is enabled at runtime but could not figure out mapping for container UID 0 ")
+	var uidMappings []*pb.LinuxIDMapping
+	var gidMappings []*pb.LinuxIDMapping
+	if s.defaultIDMappings != nil && !s.defaultIDMappings.Empty() {
+		for _, uid := range defaultIDMappings.Uids {
+			uidMappings = append(uidMappings, &pb.LinuxIDMapping{
+				ContainerId: uint32(uid.ContainerID),
+				HostId:      uint32(uid.HostID),
+				Size_:       uint32(uid.Size),
+			})
 		}
-		uidMapping.HostId = uint32(hostID)
-		uidMapping.Size_ = uint32(size)
-
-		hostID, size = s.getHostIDAndSizeForContainerID(0, defaultIDMappings.Gids)
-		if hostID < 0 || size <= 0 {
-			return nil, errors.New("usernamespace mapping is enabled at runtime but could not figure out mapping for container GID 0 ")
+		for _, gid := range defaultIDMappings.Gids {
+			gidMappings = append(gidMappings, &pb.LinuxIDMapping{
+				ContainerId: uint32(gid.ContainerID),
+				HostId:      uint32(gid.HostID),
+				Size_:       uint32(gid.Size),
+			})
 		}
-		gidMapping.HostId = uint32(hostID)
-		gidMapping.Size_ = uint32(size)
+	} else {
+		uidMappings = append(uidMappings, &pb.LinuxIDMapping{
+			ContainerId: uint32(0),
+			HostId:      uint32(0),
+			Size_:       uint32(4294967295),
+		})
+		gidMappings = append(gidMappings, &pb.LinuxIDMapping{
+			ContainerId: uint32(0),
+			HostId:      uint32(0),
+			Size_:       uint32(4294967295),
+		})
 	}
-	logrus.Debugf("GetRuntimeConfigInfo: default hostUID %v, hostGID %v", uidMapping.HostId, gidMapping.HostId)
 	linuxConfig := &pb.LinuxUserNamespaceConfig{
-		UidMappings: []*pb.LinuxIDMapping{uidMapping},
-		GidMappings: []*pb.LinuxIDMapping{gidMapping},
+		UidMappings: uidMappings,
+		GidMappings: gidMappings,
 	}
 	activeRuntimeConfig := &pb.ActiveRuntimeConfig{UserNamespaceConfig: linuxConfig}
 	return &pb.GetRuntimeConfigInfoResponse{RuntimeConfig: activeRuntimeConfig}, nil

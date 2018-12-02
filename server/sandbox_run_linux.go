@@ -99,7 +99,7 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 	idMappings := &idtools.IDMappings{}
 	gids := []idtools.IDMap{}
 
-	if s.defaultIDMappings != nil {
+	if s.defaultIDMappings != nil && req.GetConfig().GetLinux().GetSecurityContext().GetNamespaceOptions().GetUser() == pb.NamespaceMode_NODE_WIDE_REMAPPED {
 		for _, group := range req.GetConfig().GetLinux().GetSecurityContext().GetSupplementalGroups() {
 			gids = s.defaultIDMappings.GIDs()
 			gids = append(gids, idtools.IDMap{
@@ -398,7 +398,7 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 	}
 	g.AddAnnotation(annotations.CgroupParent, cgroupParent)
 
-	if s.defaultIDMappings != nil && !s.defaultIDMappings.Empty() {
+	if s.defaultIDMappings != nil && !s.defaultIDMappings.Empty() && req.GetConfig().GetLinux().GetSecurityContext().GetNamespaceOptions().GetUser() == pb.NamespaceMode_NODE_WIDE_REMAPPED {
 		g.AddOrReplaceLinuxNamespace(spec.UserNamespace, "")
 		for _, uidmap := range s.defaultIDMappings.UIDs() {
 			g.AddLinuxUIDMapping(uint32(uidmap.HostID), uint32(uidmap.ContainerID), uint32(uidmap.Size))

@@ -915,7 +915,7 @@ func (s *Server) createSandboxContainer(ctx context.Context, containerID string,
 	}
 
 	container.SetIDMappings(containerIDMappings)
-	if s.defaultIDMappings != nil && !s.defaultIDMappings.Empty() {
+	if s.defaultIDMappings != nil && !s.defaultIDMappings.Empty() && containerConfig.GetLinux().GetSecurityContext().GetNamespaceOptions().GetUser() == pb.NamespaceMode_NODE_WIDE_REMAPPED {
 		userNsPath := sb.UserNsPath()
 		rootPair := s.defaultIDMappings.RootPair()
 
