@@ -15,6 +15,7 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containers/storage"
+	"github.com/containers/storage/pkg/idtools"
 	"github.com/kubernetes-sigs/cri-o/lib/sandbox"
 	"github.com/kubernetes-sigs/cri-o/oci"
 	"github.com/kubernetes-sigs/cri-o/pkg/annotations"
@@ -95,7 +96,20 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 			s.ReleaseContainerName(containerName)
 		}
 	}()
+	idMappings := &idtools.IDMappings{}
+	gids := []idtools.IDMap{}
 
+	if s.defaultIDMappings != nil {
+		for _, group := range req.GetConfig().GetLinux().GetSecurityContext().GetSupplementalGroups() {
+			gids = s.defaultIDMappings.GIDs()
+			gids = append(gids, idtools.IDMap{
+				ContainerID: int(group),
+				HostID:      int(group),
+				Size:        1,
+			})
+		}
+		idMappings = idtools.NewIDMappingsFromMaps(s.defaultIDMappings.UIDs(), gids)
+	}
 	podContainer, err := s.StorageRuntimeServer().CreatePodSandbox(s.ImageContext(),
 		name, id,
 		s.config.PauseImage, "",
@@ -104,7 +118,7 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 		req.GetConfig().GetMetadata().GetUid(),
 		namespace,
 		attempt,
-		s.defaultIDMappings,
+		idMappings,
 		nil)
 	if errors.Cause(err) == storage.ErrDuplicateName {
 		return nil, fmt.Errorf("pod sandbox with name %q already exists", name)
@@ -391,6 +405,10 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 		}
 		for _, gidmap := range s.defaultIDMappings.GIDs() {
 			g.AddLinuxGIDMapping(uint32(gidmap.HostID), uint32(gidmap.ContainerID), uint32(gidmap.Size))
+		}
+		for _, group := range req.GetConfig().GetLinux().GetSecurityContext().GetSupplementalGroups() {
+			logrus.Debugf("Adding namespace 1:1 mapping for group id %v", group)
+			g.AddLinuxGIDMapping(uint32(group), uint32(group), uint32(1))
 		}
 	}
 

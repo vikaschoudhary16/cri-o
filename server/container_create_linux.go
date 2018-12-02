@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	//"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -149,7 +150,7 @@ func (s *Server) createContainerPlatform(container *oci.Container, infraContaine
 	if intermediateMountPoint == "" {
 		return s.Runtime().CreateContainer(container, cgroupParent)
 	}
-
+	//	debug.PrintStack()
 	errc := make(chan error)
 	go func() {
 		// We create a new mount namespace before running the container as the rootfs of the
@@ -196,13 +197,13 @@ func (s *Server) createContainerPlatform(container *oci.Container, infraContaine
 		if err != nil {
 			return
 		}
-
+		logrus.Debugf("intermediateMountPoint %s, rootUID %v, rootGID %v", intermediateMountPoint, rootUID, rootGID)
 		mountPoint := container.MountPoint()
 		err = os.Chown(mountPoint, rootUID, rootGID)
 		if err != nil {
 			return
 		}
-
+		//logrus.Debugf("icontainer.MountPoint %s, rootUID %v, rootGID %v", mountPoint, rootUID, rootGID)
 		rootPath := filepath.Join(intermediateMountPoint, "root")
 		err = idtools.MkdirAllAs(rootPath, 0700, rootUID, rootGID)
 		if err != nil {
@@ -232,25 +233,50 @@ func (s *Server) createContainerPlatform(container *oci.Container, infraContaine
 		}
 
 		runDirPath := filepath.Join(intermediateMountPoint, "rundir")
-		err = os.MkdirAll(runDirPath, 0700)
+		err = idtools.MkdirAllAs(runDirPath, 0700, rootUID, rootGID)
 		if err != nil {
 			return
 		}
-
+		err = chownAllFilesAt(container.BundlePath(), rootUID, rootGID)
+		if err != nil {
+			logrus.Errorf("err in chowning container.BundlePath() with rootUID %v rootGID %v: %v", rootUID, rootGID, err)
+			return
+		}
+		logrus.Debugf("chowned container.BundlePath(), %s,  with rootUID %v rootGID %v", container.BundlePath(), rootUID, rootGID)
 		err = unix.Mount(container.BundlePath(), runDirPath, "none", unix.MS_BIND, "suid")
 		if err != nil {
 			return
 		}
-		err = os.Chown(runDirPath, rootUID, rootGID)
-		if err != nil {
-			return
-		}
-
+		//err = os.Chown(runDirPath, rootUID, rootGID)
+		//if err != nil {
+		//	logrus.Debugf("err in chowning rundirPath with rootUID %v rootGID %v: %v", err, rootUID, rootGID)
+		//	return
+		//}
+		//logrus.Debugf("chowned rundirPath, %s,  with rootUID %v rootGID %v", runDirPath, rootUID, rootGID)
 		err = s.Runtime().CreateContainer(container, cgroupParent)
 	}()
 
 	err := <-errc
 	return err
+}
+
+func chownAllFilesAt(dir string, uid int, gid int) error {
+	var files []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		err = os.Chown(file, uid, gid)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) createSandboxContainer(ctx context.Context, containerID string, containerName string, sb *sandbox.Sandbox, sandboxConfig *pb.PodSandboxConfig, containerConfig *pb.ContainerConfig) (*oci.Container, error) {
@@ -901,6 +927,9 @@ func (s *Server) createSandboxContainer(ctx context.Context, containerID string,
 		}
 		for _, gidmap := range s.defaultIDMappings.GIDs() {
 			specgen.AddLinuxGIDMapping(uint32(gidmap.HostID), uint32(gidmap.ContainerID), uint32(gidmap.Size))
+		}
+		for _, gid := range specgen.Config.Process.User.AdditionalGids {
+			specgen.AddLinuxGIDMapping(gid, gid, uint32(1))
 		}
 		err = s.configureIntermediateNamespace(&specgen, container, sb.InfraContainer())
 		if err != nil {
