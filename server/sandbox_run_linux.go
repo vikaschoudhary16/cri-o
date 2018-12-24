@@ -408,7 +408,10 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 		}
 		for _, group := range req.GetConfig().GetLinux().GetSecurityContext().GetSupplementalGroups() {
 			logrus.Debugf("Adding namespace 1:1 mapping for group id %v", group)
-			g.AddLinuxGIDMapping(uint32(group), uint32(group), uint32(1))
+			err = s.addAdditionalGIDToLinuxGIDMappings(&g, uint32(group))
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

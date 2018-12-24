@@ -929,7 +929,10 @@ func (s *Server) createSandboxContainer(ctx context.Context, containerID string,
 			specgen.AddLinuxGIDMapping(uint32(gidmap.HostID), uint32(gidmap.ContainerID), uint32(gidmap.Size))
 		}
 		for _, gid := range specgen.Config.Process.User.AdditionalGids {
-			specgen.AddLinuxGIDMapping(gid, gid, uint32(1))
+			err = s.addAdditionalGIDToLinuxGIDMappings(&specgen, gid)
+			if err != nil {
+				return nil, err
+			}
 		}
 		err = s.configureIntermediateNamespace(&specgen, container, sb.InfraContainer())
 		if err != nil {
@@ -973,6 +976,26 @@ func (s *Server) createSandboxContainer(ctx context.Context, containerID string,
 	}
 
 	return container, nil
+}
+
+func (s *Server) addAdditionalGIDToLinuxGIDMappings(specgen *generate.Generator, gid uint32) error {
+	gidMapFoundInDefault := false
+	for _, gidmap := range s.defaultIDMappings.GIDs() {
+		logrus.Infof("gid %v, gidMap %v", gid, gidmap)
+		if gid >= uint32(gidmap.ContainerID) && gid <= uint32(gidmap.ContainerID+gidmap.Size) {
+			if gidmap.ContainerID != gidmap.HostID {
+				return fmt.Errorf("invalid configuration")
+			}
+			gidMapFoundInDefault = true
+			break
+		}
+	}
+	logrus.Infof("gidMapFoundInDefault %v", gidMapFoundInDefault)
+	if !gidMapFoundInDefault {
+		// add gid to default mappings
+		specgen.AddLinuxGIDMapping(gid, gid, uint32(1))
+	}
+	return nil
 }
 
 func setupWorkingDirectory(rootfs, mountLabel, containerCwd string) error {
